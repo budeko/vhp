@@ -1,0 +1,14 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: isolate-user-namespace
+spec:
+  podSelector: {} # Tüm podları seç
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector: {} # Sadece aynı namespace içindeki podlar konuşabilir
+    - namespaceSelector:
+        matchLabels:
+          vhp-layer: management # Controller ve Panel'den gelen trafiğe izin ver
