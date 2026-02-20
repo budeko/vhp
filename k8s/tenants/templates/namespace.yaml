@@ -1,0 +1,9 @@
+# Tenant namespace template. Replace CUSTOMER_ID and apply.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cust-${CUSTOMER_ID}
+  labels:
+    tenant: "true"
+    customer-id: "${CUSTOMER_ID}"
+    backup: "true"

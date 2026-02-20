@@ -1,0 +1,15 @@
+# Optional: per-tenant DB volume (e.g. SQLite or MySQL data dir).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: db-data
+  namespace: cust-${CUSTOMER_ID}
+  labels:
+    tenant: "true"
+    customer-id: "${CUSTOMER_ID}"
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: longhorn

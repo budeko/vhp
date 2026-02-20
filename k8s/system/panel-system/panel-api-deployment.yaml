@@ -1,0 +1,113 @@
+# Panel API (Node.js or Go) — handles provisioning, PowerDNS API, mail DB, K8s API.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: panel-api
+  namespace: panel-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: panel-api
+  template:
+    metadata:
+      labels:
+        app: panel-api
+    spec:
+      serviceAccountName: panel-api
+      containers:
+        - name: api
+          image: your-registry/panel-api:latest
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: panel-api-secrets
+                  key: database-url
+            - name: POWERDNS_API_URL
+              value: "http://powerdns.dns-system.svc.cluster.local:8081"
+            - name: POWERDNS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: panel-api-secrets
+                  key: powerdns-api-key
+            - name: MAIL_MYSQL_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: panel-api-secrets
+                  key: mail-mysql-dsn
+            - name: KUBECONFIG
+              value: "/var/run/secrets/kubernetes.io/serviceaccount/token"
+          ports:
+            - containerPort: 3000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: panel-api-secrets
+  namespace: panel-system
+type: Opaque
+stringData:
+  database-url: "postgres://panel:changeme@panel-postgres.panel-system.svc.cluster.local:5432/panel"
+  powerdns-api-key: "changeme-apikey"
+  mail-mysql-dsn: "mail:changeme@tcp(mail-mysql.mail-system.svc.cluster.local:3306)/mail"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: panel-api
+  namespace: panel-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: panel-api-provisioner
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "pods", "pods/log", "services", "persistentvolumeclaims", "secrets", "configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["resourcequotas", "limitranges"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: panel-api-provisioner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: panel-api-provisioner
+subjects:
+  - kind: ServiceAccount
+    name: panel-api
+    namespace: panel-system
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: panel-api
+  namespace: panel-system
+spec:
+  selector:
+    app: panel-api
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: http

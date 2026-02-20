@@ -1,0 +1,31 @@
+# Velero server deployment (simplified). Prefer Helm with velero-values.yaml for S3 config.
+# Prerequisites: create S3 bucket, create Secret velero-credentials with [default] aws keys.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: velero-credentials
+  namespace: backup-system
+type: Opaque
+stringData:
+  cloud: |
+    [default]
+    aws_access_key_id=REPLACE
+    aws_secret_access_key=REPLACE
+---
+# BackupStorageLocation and Schedule are CRDs - apply after Velero is installed.
+# Example Schedule for tenant-only backup:
+# apiVersion: velero.io/v1
+# kind: Schedule
+# metadata:
+#   name: daily-tenants
+#   namespace: backup-system
+# spec:
+#   schedule: "0 2 * * *"
+#   template:
+#     includeNamespaceResources: true
+#     labelSelector:
+#       matchLabels:
+#         tenant: "true"
+#     storageLocation: default
+#     ttl: 720h

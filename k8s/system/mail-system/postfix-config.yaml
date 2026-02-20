@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postfix-config
+  namespace: mail-system
+data:
+  main.cf: |
+    # Network
+    myhostname = mail.platform.example.com
+    mydomain = platform.example.com
+    inet_interfaces = all
+    inet_protocols = ipv4
+
+    # Virtual domains (MySQL)
+    virtual_mailbox_domains = mysql:/etc/postfix/mysql-virtual-mailbox-domains.cf
+    virtual_mailbox_maps = mysql:/etc/postfix/mysql-virtual-mailbox-maps.cf
+    virtual_alias_maps = mysql:/etc/postfix/mysql-virtual-alias-maps.cf
+    virtual_uid_maps = static:5000
+    virtual_gid_maps = static:5000
+    virtual_minimum_uid = 100
+    virtual_mailbox_base = /var/mail/vhosts
+
+    # SMTP
+    smtpd_banner = $myhostname ESMTP
+    biff = no
+    append_dot_mydomain = no
+    readme_directory = no
+    compatibility_level = 2
+
+    # TLS
+    smtpd_tls_cert_file = /etc/ssl/certs/mail.crt
+    smtpd_tls_key_file = /etc/ssl/private/mail.key
+    smtpd_use_tls = yes
+    smtpd_tls_security_level = may
+    smtpd_tls_auth_only = yes
+    smtpd_sasl_type = dovecot
+    smtpd_sasl_path = private/auth
+    smtpd_sasl_auth_enable = yes
+    smtpd_sasl_security_options = noanonymous
+    smtpd_sasl_local_domain = $myhostname
+
+    # Restrictions
+    smtpd_recipient_restrictions = permit_sasl_authenticated, permit_mynetworks, reject_unauth_destination
+    smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, defer_unauth_destination
+    mynetworks = 127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+
+    # Rspamd
+    smtpd_milters = inet:rspamd:11332
+    non_smtpd_milters = inet:rspamd:11332
+    milter_default_action = accept
+    milter_protocol = 6
+
+    # Mailbox
+    virtual_transport = lmtp:unix:private/dovecot-lmtp
+  mysql-virtual-mailbox-domains.cf: |
+    hosts = mail-mysql.mail-system.svc.cluster.local
+    user = mail
+    password = changeme
+    dbname = mail
+    query = SELECT 1 FROM virtual_domains WHERE name='%s'
+  mysql-virtual-mailbox-maps.cf: |
+    hosts = mail-mysql.mail-system.svc.cluster.local
+    user = mail
+    password = changeme
+    dbname = mail
+    query = SELECT CONCAT(name,'/') FROM virtual_domains WHERE name='%s'
+  mysql-virtual-alias-maps.cf: |
+    hosts = mail-mysql.mail-system.svc.cluster.local
+    user = mail
+    password = changeme
+    dbname = mail
+    query = SELECT destination FROM virtual_aliases WHERE source='%s'

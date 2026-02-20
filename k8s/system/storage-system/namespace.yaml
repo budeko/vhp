@@ -1,0 +1,10 @@
+# Longhorn is typically installed in longhorn-system namespace (from upstream manifest).
+# This namespace is optional for platform-specific storage config.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: storage-system
+  labels:
+    app.kubernetes.io/name: storage-system
+    system: "true"
+    tier: core

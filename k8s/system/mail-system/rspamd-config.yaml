@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rspamd-config
+  namespace: mail-system
+data:
+  rspamd.conf: |
+    worker {
+      type = normal
+      bind_socket = "*:11333";
+      count = 1;
+    }
+    worker {
+      type = rspamd_proxy
+      bind_socket = "*:11332";
+      count = 1;
+      upstream "local" {
+        default = yes;
+        self_scan = yes;
+      }
+    }
+    dns {
+      nameserver = "1.1.1.1, 8.8.8.8";
+    }
+    # DKIM: keys loaded from /etc/rspamd/dkim (mounted from Secrets per domain)
+    dkim_signing {
+      path = "/etc/rspamd/dkim/$domain.$selector.key";
+      selector = "default";
+    }

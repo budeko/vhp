@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dovecot
+  namespace: mail-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dovecot
+  template:
+    metadata:
+      labels:
+        app: dovecot
+    spec:
+      containers:
+        - name: dovecot
+          image: dovecot/dovecot:2.3-alpine
+          ports:
+            - containerPort: 993
+              name: imaps
+            - containerPort: 143
+              name: imap
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dovecot
+              readOnly: true
+            - name: maildata
+              mountPath: /var/mail
+            - name: dovecot-auth
+              mountPath: /var/spool/postfix/private
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: config
+          configMap:
+            name: dovecot-config
+        - name: maildata
+          persistentVolumeClaim:
+            claimName: mail-data
+        - name: dovecot-auth
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dovecot
+  namespace: mail-system
+spec:
+  selector:
+    app: dovecot
+  ports:
+    - port: 993
+      targetPort: 993
+      name: imaps
+    - port: 143
+      targetPort: 143
+      name: imap

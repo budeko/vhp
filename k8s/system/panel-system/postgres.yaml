@@ -1,0 +1,86 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: panel-postgres
+  namespace: panel-system
+type: Opaque
+stringData:
+  POSTGRES_USER: panel
+  POSTGRES_PASSWORD: "changeme"
+  POSTGRES_DB: panel
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: panel-postgres-data
+  namespace: panel-system
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: longhorn
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: panel-postgres
+  namespace: panel-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: panel-postgres
+  template:
+    metadata:
+      labels:
+        app: panel-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: panel-postgres
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: panel-postgres
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: panel-postgres
+                  key: POSTGRES_DB
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: panel-postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: panel-postgres
+  namespace: panel-system
+spec:
+  selector:
+    app: panel-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres

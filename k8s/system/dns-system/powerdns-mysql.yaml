@@ -1,0 +1,95 @@
+# MySQL for PowerDNS backend (zones, records). Optional: use PostgreSQL with pdns-pg.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: powerdns-mysql
+  namespace: dns-system
+type: Opaque
+stringData:
+  MYSQL_ROOT_PASSWORD: "changeme"
+  MYSQL_DATABASE: powerdns
+  MYSQL_USER: powerdns
+  MYSQL_PASSWORD: "changeme"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: powerdns-mysql-data
+  namespace: dns-system
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: longhorn
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: powerdns-mysql
+  namespace: dns-system
+spec:
+  serviceName: powerdns-mysql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: powerdns-mysql
+  template:
+    metadata:
+      labels:
+        app: powerdns-mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: powerdns-mysql
+                  key: MYSQL_ROOT_PASSWORD
+            - name: MYSQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: powerdns-mysql
+                  key: MYSQL_DATABASE
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: powerdns-mysql
+                  key: MYSQL_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: powerdns-mysql
+                  key: MYSQL_PASSWORD
+          ports:
+            - containerPort: 3306
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: powerdns-mysql-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: powerdns-mysql
+  namespace: dns-system
+spec:
+  clusterIP: None
+  selector:
+    app: powerdns-mysql
+  ports:
+    - port: 3306
+      targetPort: 3306
+      name: mysql

@@ -1,0 +1,111 @@
+# PowerDNS Authoritative Server with API and PostgreSQL backend.
+# Initialize DB with PowerDNS schema (see dns/ folder for schema).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: powerdns-api
+  namespace: dns-system
+type: Opaque
+stringData:
+  api-key: "changeme-apikey"
+  pdns-pg-password: "changeme"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: powerdns
+  namespace: dns-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: powerdns
+  template:
+    metadata:
+      labels:
+        app: powerdns
+    spec:
+      containers:
+        - name: powerdns
+          image: powerdns/pdns-auth:49
+          args:
+            - --config-dir=/etc/pdns
+            - --daemon=no
+            - --guardian=no
+            - --write-pid=no
+          env:
+            - name: PDNS_GPGSQL_HOST
+              value: powerdns-pg.dns-system.svc.cluster.local
+            - name: PDNS_GPGSQL_PORT
+              value: "5432"
+            - name: PDNS_GPGSQL_DBNAME
+              value: powerdns
+            - name: PDNS_GPGSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: powerdns-pg
+                  key: POSTGRES_USER
+            - name: PDNS_GPGSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: powerdns-pg
+                  key: POSTGRES_PASSWORD
+            - name: PDNS_API
+              value: "yes"
+            - name: PDNS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: powerdns-api
+                  key: api-key
+            - name: PDNS_WEBSERVER
+              value: "yes"
+            - name: PDNS_WEBSERVER_ADDRESS
+              value: 0.0.0.0
+            - name: PDNS_WEBSERVER_PORT
+              value: "8081"
+          ports:
+            - containerPort: 53
+              name: dns-udp
+              protocol: UDP
+            - containerPort: 53
+              name: dns-tcp
+              protocol: TCP
+            - containerPort: 8081
+              name: api
+          volumeMounts:
+            - name: config
+              mountPath: /etc/pdns
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: config
+          configMap:
+            name: powerdns-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: powerdns
+  namespace: dns-system
+spec:
+  type: ClusterIP
+  selector:
+    app: powerdns
+  ports:
+    - port: 53
+      targetPort: 53
+      name: dns-udp
+      protocol: UDP
+    - port: 53
+      targetPort: 53
+      name: dns-tcp
+      protocol: TCP
+    - port: 8081
+      targetPort: 8081
+      name: api

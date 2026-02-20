@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: panel-system
+  labels:
+    app.kubernetes.io/name: panel-system
+    system: "true"
+    tier: core

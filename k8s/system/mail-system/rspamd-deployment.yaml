@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rspamd
+  namespace: mail-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rspamd
+  template:
+    metadata:
+      labels:
+        app: rspamd
+    spec:
+      containers:
+        - name: rspamd
+          image: rspamd/rspamd:latest
+          ports:
+            - containerPort: 11333
+              name: worker
+            - containerPort: 11332
+              name: proxy
+          volumeMounts:
+            - name: config
+              mountPath: /etc/rspamd
+              readOnly: true
+            # DKIM keys: mount Secret(s) per domain; in production use projected volume or init that copies dkim-* secrets
+            - name: dkim-keys
+              mountPath: /etc/rspamd/dkim
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: config
+          configMap:
+            name: rspamd-config
+        - name: dkim-keys
+          secret:
+            secretName: dkim-placeholder
+            optional: true
+---
+# Placeholder so volume mounts. Replace with actual DKIM secrets per domain; or use a single Secret that aggregates keys.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dkim-placeholder
+  namespace: mail-system
+type: Opaque
+data:
+  placeholder: cGxhY2Vob2xkZXI=
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rspamd
+  namespace: mail-system
+spec:
+  selector:
+    app: rspamd
+  ports:
+    - port: 11333
+      targetPort: 11333
+      name: worker
+    - port: 11332
+      targetPort: 11332
+      name: proxy
