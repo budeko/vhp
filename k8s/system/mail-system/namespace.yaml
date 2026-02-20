@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: mail-system
-  labels:
-    app.kubernetes.io/name: mail-system
-    system: "true"
-    tier: core

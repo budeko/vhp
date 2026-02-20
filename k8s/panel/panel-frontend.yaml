@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: panel-frontend
+  namespace: panel-system
+  labels:
+    app: panel-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: panel-frontend
+  template:
+    metadata:
+      labels:
+        app: panel-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: panel-frontend:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NEXT_PUBLIC_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: panel-frontend-config
+                  key: NEXT_PUBLIC_API_URL
+          ports:
+            - containerPort: 3000
+              name: http
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: panel-frontend-config
+  namespace: panel-system
+data:
+  NEXT_PUBLIC_API_URL: "http://api.example.local"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: panel-frontend
+  namespace: panel-system
+  labels:
+    app: panel-frontend
+spec:
+  selector:
+    app: panel-frontend
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: http
