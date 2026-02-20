@@ -1,0 +1,129 @@
+{{/*
+  SİSTEM — Güvenlik politikaları (vhp-policy)
+  Kyverno ClusterPolicy: ingress class, LoadBalancer/NodePort yasak. values: policy.enabled
+*/}}
+{{- if .Values.policy.enabled }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vhp-policy
+  labels:
+    vhp-layer: infrastructure
+    vhp-type: policy
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kyverno-config
+  namespace: vhp-policy
+data:
+  resourceFilters: "[*,*]"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-vhp-ingress-class
+  annotations:
+    policies.kyverno.io/title: Require vhp-traefik IngressClass
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+  - name: check-ingress-class
+    match:
+      any:
+      - resources:
+          kinds: [Ingress]
+          namespaces: ["user-*"]
+    validate:
+      message: "Ingress'lerde spec.ingressClassName vhp-traefik olmalıdır."
+      pattern:
+        spec:
+          ingressClassName: vhp-traefik
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: deny-loadbalancer-services
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+  - name: deny-loadbalancer
+    match:
+      any:
+      - resources:
+          kinds: [Service]
+          namespaces: ["user-*"]
+    validate:
+      message: "LoadBalancer tipi Service kullanıcı alanlarında izin verilmez."
+      deny:
+        conditions:
+          any:
+          - key: "{{ request.object.spec.type }}"
+            operator: Equals
+            value: LoadBalancer
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: deny-nodeport-services
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+  - name: deny-nodeport
+    match:
+      any:
+      - resources:
+          kinds: [Service]
+          namespaces: ["user-*"]
+    validate:
+      message: "NodePort tipi Service kullanıcı alanlarında izin verilmez."
+      deny:
+        conditions:
+          any:
+          - key: "{{ request.object.spec.type }}"
+            operator: Equals
+            value: NodePort
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: policy-quota
+  namespace: vhp-policy
+spec:
+  hard:
+    requests.cpu: "500m"
+    requests.memory: "512Mi"
+    limits.cpu: "1"
+    limits.memory: "1Gi"
+    pods: "10"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: policy-limits
+  namespace: vhp-policy
+spec:
+  limits:
+  - default:
+      cpu: 200m
+      memory: 256Mi
+    defaultRequest:
+      cpu: 50m
+      memory: 64Mi
+    type: Container
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: policy-allow-all-egress
+  namespace: vhp-policy
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - {}
+{{- end }}

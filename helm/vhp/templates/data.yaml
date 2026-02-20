@@ -1,0 +1,159 @@
+{{/*
+  ZON — Veritabanı (vhp-data)
+  PostgreSQL StatefulSet. values: data.enabled, data.db.*
+*/}}
+{{- if .Values.data.enabled }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vhp-data
+  labels:
+    vhp-layer: infrastructure
+    vhp-type: data
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vhp-db-secret
+  namespace: vhp-data
+type: Opaque
+stringData:
+  username: vhp
+  password: {{ .Values.data.db.password | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vhp-db
+  namespace: vhp-data
+  labels:
+    app: vhp-db
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - port: 5432
+    targetPort: 5432
+    name: postgres
+    protocol: TCP
+  selector:
+    app: vhp-db
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vhp-db
+  namespace: vhp-data
+  labels:
+    app: vhp-db
+spec:
+  serviceName: vhp-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vhp-db
+  template:
+    metadata:
+      labels:
+        app: vhp-db
+    spec:
+      containers:
+      - name: db
+        image: postgres:16-alpine
+        ports:
+        - containerPort: 5432
+          name: postgres
+        env:
+        - name: POSTGRES_DB
+          value: vhp
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: vhp-db-secret
+              key: username
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: vhp-db-secret
+              key: password
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 2Gi
+        livenessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 5
+          periodSeconds: 5
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: {{ .Values.data.db.storage | default "10Gi" }}
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: data-quota
+  namespace: vhp-data
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: "4Gi"
+    limits.cpu: "4"
+    limits.memory: "8Gi"
+    pods: "5"
+    persistentvolumeclaims: "5"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: data-limits
+  namespace: vhp-data
+spec:
+  limits:
+  - default:
+      cpu: "1"
+      memory: 2Gi
+    defaultRequest:
+      cpu: 250m
+      memory: 512Mi
+    type: Container
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: data-allow-from-management
+  namespace: vhp-data
+spec:
+  podSelector:
+    matchLabels:
+      app: vhp-db
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          vhp-layer: management
+    - namespaceSelector:
+        matchLabels:
+          vhp-layer: infrastructure
+    ports:
+    - protocol: TCP
+      port: 5432
+{{- end }}

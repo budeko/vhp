@@ -1,0 +1,98 @@
+# VHP Platform - Helm Values
+# Kurulum sırasında installer script ile doldurulur veya -f ile verilir.
+
+# --- Global (tüm zonlar için) ---
+global:
+  # Panel erişim hostu (örn. panel.example.com)
+  panelHost: "panel.vhp-platform.com"
+  # Admin e-posta (sertifika bildirimleri ve iletişim)
+  letsEncryptEmail: "admin@example.com"
+  # İlk panel girişi için admin kullanıcı (installer ile sorulur)
+  adminUsername: "admin"
+  adminPassword: ""  # installer --set-file ile verir; dosyada tutmayın
+  # Panel ve Controller bu repodan (panel/ ve controller/); varsayılan image'lar aşağıda
+  imageRegistry: "ghcr.io"
+  panelImage: "vhp-platform/vhp-panel:latest"
+  controllerImage: "vhp-platform/vhp-controller:latest"
+
+# --- Zorunlu zonlar (her zaman yüklü) ---
+core:
+  enabled: true
+  # Nginx: sadece dışarıya açık (80/443 LoadBalancer), Traefik'e TCP proxy
+  ingress:
+    replicas: 2
+    edgeImage: "nginx:alpine"
+  # Traefik: cluster içi Ingress (ClusterIP), tüm Ingress'ler vhp-traefik kullanır
+  traefik:
+    replicas: 2
+    image: "traefik:v3.0"
+  # Mail gateway: ConfigMap + isteğe bağlı sender Deployment
+  mail:
+    smtpHost: ""
+    smtpPort: "587"
+    smtpFrom: ""
+    smtpTls: true
+    webhookUrl: ""
+    deploySender: false
+    senderImage: "alpine:latest"  # SMTP relay imajı ile değiştirilebilir
+
+cert:
+  enabled: true
+
+control:
+  enabled: true
+
+panel:
+  enabled: true
+
+policy:
+  enabled: true
+
+# --- Opsiyonel zonlar (kurulumda seçilebilir) ---
+backup:
+  enabled: false
+  minio:
+    storage: 50Gi
+    # rootUser / rootPassword installer veya secret ile verilir
+    rootUser: "admin"
+    rootPassword: ""  # prompt ile alınacak
+
+data:
+  enabled: false
+  db:
+    storage: 10Gi
+    # dbPassword installer veya secret ile verilir
+    password: ""
+
+dns:
+  enabled: false
+
+gitops:
+  enabled: false
+  flux:
+    repoUrl: "https://github.com/your-org/vhp"
+    branch: "main"
+
+observability:
+  enabled: false
+  prometheus: true
+  loki: true
+  grafana: true
+
+# Kaniko: cluster içi image build (Flux ile tetiklenebilir)
+build:
+  enabled: false
+  kaniko:
+    schedule: "0 2 * * *"
+    context: "git://github.com/your-org/repo#refs/heads/main"
+    dockerfilePath: "Dockerfile"
+    imageDestination: "ghcr.io/your-org/app:latest"
+
+# CronJob'lar: backup cleanup, cert check, job temizlik
+cron:
+  enabled: false
+  backupCleanup: true
+  backupSchedule: "0 3 * * *"
+  certCheck: true
+  certCheckSchedule: "0 8 * * *"
+  cleanupSchedule: "0 4 * * 0"

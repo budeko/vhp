@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: vhp-core
-  labels:
-    vhp-layer: infrastructure
-    vhp-type: static-core

@@ -1,0 +1,88 @@
+{{/*
+  ZON — GitOps (vhp-gitops)
+  Flux GitRepository + Kustomization. values: gitops.enabled, gitops.flux.*
+*/}}
+{{- if .Values.gitops.enabled }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vhp-gitops
+  labels:
+    vhp-layer: infrastructure
+    vhp-type: gitops
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: flux-system
+  labels:
+    app.kubernetes.io/part-of: flux
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: vhp-infra
+  namespace: vhp-gitops
+spec:
+  interval: 1m0s
+  url: {{ .Values.gitops.flux.repoUrl | quote }}
+  ref:
+    branch: {{ .Values.gitops.flux.branch | default "main" }}
+  ignore: |
+    /.git
+---
+# Repo kökünde Kustomization yoksa bu path'i kaldırın veya HelmRelease kullanın
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: vhp-infra
+  namespace: vhp-gitops
+spec:
+  interval: 5m0s
+  sourceRef:
+    kind: GitRepository
+    name: vhp-infra
+  path: .
+  prune: true
+  wait: true
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: gitops-quota
+  namespace: vhp-gitops
+spec:
+  hard:
+    requests.cpu: "500m"
+    requests.memory: "512Mi"
+    limits.cpu: "1"
+    limits.memory: "1Gi"
+    pods: "10"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: gitops-limits
+  namespace: vhp-gitops
+spec:
+  limits:
+  - default:
+      cpu: 200m
+      memory: 256Mi
+    defaultRequest:
+      cpu: 50m
+      memory: 64Mi
+    type: Container
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gitops-allow-egress
+  namespace: vhp-gitops
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - {}
+{{- end }}

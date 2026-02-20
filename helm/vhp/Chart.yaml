@@ -1,0 +1,13 @@
+apiVersion: v2
+name: vhp
+description: VHP - Çok kullanıcılı Kubernetes platform altyapısı
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - vhp
+  - kubernetes
+  - multi-tenant
+  - platform
+maintainers:
+  - name: VHP Team

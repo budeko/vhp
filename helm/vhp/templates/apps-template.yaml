@@ -1,0 +1,108 @@
+{{/*
+  ŞABLON — Kullanıcı namespace (vhp-control)
+  Controller'ın kullandığı ConfigMap'ler: namespace, RBAC, policies, notes.
+  values: control.enabled
+*/}}
+{{- if .Values.control.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vhp-user-namespace-template
+  namespace: vhp-control
+  labels:
+    vhp-component: apps-template
+data:
+  namespace.yaml.tpl: |
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: user-{{ .Name }}
+      labels:
+        vhp-managed: "true"
+        vhp-type: "user-space"
+        vhp-user-id: "{{ .ID }}"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vhp-user-rbac-template
+  namespace: vhp-control
+  labels:
+    vhp-component: apps-template
+data:
+  rbac.yaml.tpl: |
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata:
+      name: user-admin-binding
+      namespace: user-{{ .Name }}
+    subjects:
+    - kind: User
+      name: "{{ .Email }}"
+      apiGroup: rbac.authorization.k8s.io
+    roleRef:
+      kind: ClusterRole
+      name: edit
+      apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vhp-user-policies-template
+  namespace: vhp-control
+  labels:
+    vhp-component: apps-template
+data:
+  resourcequota.yaml: |
+    apiVersion: v1
+    kind: ResourceQuota
+    metadata:
+      name: user-quota
+    spec:
+      hard:
+        requests.cpu: "500m"
+        requests.memory: "512Mi"
+        limits.cpu: "1"
+        limits.memory: "1Gi"
+        pods: "10"
+        services: "3"
+  limitrange.yaml: |
+    apiVersion: v1
+    kind: LimitRange
+    metadata:
+      name: user-limits
+    spec:
+      limits:
+      - default:
+          cpu: 500m
+          memory: 512Mi
+        defaultRequest:
+          cpu: 100m
+          memory: 128Mi
+        type: Container
+  networkpolicy.yaml: |
+    apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: isolate-user-namespace
+    spec:
+      podSelector: {}
+      policyTypes:
+      - Ingress
+      ingress:
+      - from:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              vhp-layer: management
+  notes.md.tpl: |
+    # VHP Kullanıcı Alanı: {{ .Name }}
+    Bu alan otomatik olarak oluşturulmuştur.
+    ## Erişim
+    - **Namespace:** user-{{ .Name }}
+    - **Oluşturulma:** {{ .Date }}
+    ## Kurallar
+    - Ingress'lerde ingressClassName: vhp-traefik kullanın.
+    - ResourceQuota ve NetworkPolicy uygulanmıştır.
+{{- end }}

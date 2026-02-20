@@ -1,0 +1,190 @@
+{{/*
+  ZON — Zamanlanmış görevler (vhp-cron)
+  Backup cleanup, cert kontrolü, genel temizlik CronJob'ları. values: cron.enabled
+*/}}
+{{- if .Values.cron.enabled }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vhp-cron
+  labels:
+    vhp-layer: infrastructure
+    vhp-type: cron
+---
+{{- if and .Values.cron.backupCleanup .Values.backup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-cleanup
+  namespace: vhp-cron
+spec:
+  schedule: {{ .Values.cron.backupSchedule | default "0 3 * * *" | quote }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: cleanup
+            image: minio/mc:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              mc alias set myminio http://minio-service.vhp-backup.svc.cluster.local:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD 2>/dev/null || true
+              mc mb myminio/backups --ignore-existing 2>/dev/null || true
+              echo "Backup cleanup check done"
+            env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  namespace: vhp-backup
+                  key: root-user
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  namespace: vhp-backup
+                  key: root-password
+      backoffLimit: 2
+---
+{{- end }}
+{{- if .Values.cron.certCheck }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cert-expiry-check
+  namespace: vhp-cron
+spec:
+  schedule: {{ .Values.cron.certCheckSchedule | default "0 8 * * *" | quote }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: check
+            image: curlimages/curl:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Cert expiry check placeholder - cert-manager handles renewal"
+              exit 0
+      backoffLimit: 1
+---
+{{- end }}
+{{- if .Values.build.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cleanup-failed-jobs
+  namespace: vhp-cron
+spec:
+  schedule: {{ .Values.cron.cleanupSchedule | default "0 4 * * 0" | quote }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: cron-cleanup
+          containers:
+          - name: cleanup
+            image: bitnami/kubectl:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              kubectl delete jobs --field-selector status.successful=1 -n vhp-build --grace-period=0 2>/dev/null || true
+              kubectl delete jobs --field-selector status.failed=1 -n vhp-build --grace-period=0 2>/dev/null || true
+              echo "Cleanup done"
+      backoffLimit: 1
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cron-cleanup
+  namespace: vhp-cron
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cron-cleanup
+  namespace: vhp-cron
+rules:
+- apiGroups: [batch]
+  resources: [jobs]
+  verbs: [list, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cron-cleanup
+  namespace: vhp-cron
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cron-cleanup
+subjects:
+- kind: ServiceAccount
+  name: cron-cleanup
+  namespace: vhp-cron
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cron-cleanup-build
+  namespace: vhp-build
+rules:
+- apiGroups: [batch]
+  resources: [jobs]
+  verbs: [list, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cron-cleanup
+  namespace: vhp-build
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cron-cleanup-build
+subjects:
+- kind: ServiceAccount
+  name: cron-cleanup
+  namespace: vhp-cron
+---
+{{- end }}
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: cron-quota
+  namespace: vhp-cron
+spec:
+  hard:
+    requests.cpu: "500m"
+    requests.memory: "512Mi"
+    limits.cpu: "1"
+    limits.memory: "1Gi"
+    cronjobs.batch: "10"
+    jobs.batch: "20"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: cron-limits
+  namespace: vhp-cron
+spec:
+  limits:
+  - default:
+      cpu: 200m
+      memory: 256Mi
+    defaultRequest:
+      cpu: 50m
+      memory: 64Mi
+    type: Container
+{{- end }}

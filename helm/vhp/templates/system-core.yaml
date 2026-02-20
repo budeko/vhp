@@ -1,0 +1,361 @@
+{{/*
+  SİSTEM — Çekirdek altyapı (vhp-core)
+  Dışarıya açık: Nginx (80/443 LoadBalancer). İçeride: Traefik Ingress (vhp-traefik).
+  DNS/Mail gateway config, platform-config.
+  values: core.enabled
+*/}}
+{{- if .Values.core.enabled }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vhp-core
+  labels:
+    vhp-layer: infrastructure
+    vhp-type: static-core
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: vhp-system-high
+value: 1000000
+globalDefault: false
+description: "VHP altyapı bileşenleri için yüksek öncelik"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: vhp-system-critical
+value: 2000000
+globalDefault: false
+description: "VHP kritik sistem bileşenleri (ingress, DNS)"
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: core-quota
+  namespace: vhp-core
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: "8Gi"
+    limits.cpu: "8"
+    limits.memory: "16Gi"
+    pods: "20"
+    services: "10"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: core-limits
+  namespace: vhp-core
+spec:
+  limits:
+  - default:
+      cpu: "1"
+      memory: 2Gi
+    defaultRequest:
+      cpu: 100m
+      memory: 256Mi
+    type: Container
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: core-allow-ingress-and-egress
+  namespace: vhp-core
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector: {}
+  egress:
+  - {}
+---
+# --- IngressClass: içeride Traefik kullanılır ---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: vhp-traefik
+  annotations:
+    ingressclass.kubernetes.io/is-default-class: "true"
+spec:
+  controller: traefik.io/ingress-controller
+---
+# --- Traefik: cluster içi Ingress (ClusterIP, dışarı açılmaz) ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: traefik
+  namespace: vhp-core
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vhp-traefik
+rules:
+- apiGroups: [""]
+  resources: [services, endpoints, secrets]
+  verbs: [get, list, watch]
+- apiGroups: [networking.k8s.io]
+  resources: [ingresses]
+  verbs: [get, list, watch]
+- apiGroups: [networking.k8s.io]
+  resources: [ingresses/status]
+  verbs: [update]
+- apiGroups: [networking.k8s.io]
+  resources: [ingressclasses]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vhp-traefik
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vhp-traefik
+subjects:
+- kind: ServiceAccount
+  name: traefik
+  namespace: vhp-core
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traefik
+  namespace: vhp-core
+  labels:
+    app: traefik
+spec:
+  replicas: {{ .Values.core.traefik.replicas | default 2 }}
+  selector:
+    matchLabels:
+      app: traefik
+  template:
+    metadata:
+      labels:
+        app: traefik
+    spec:
+      priorityClassName: vhp-system-critical
+      serviceAccountName: traefik
+      containers:
+      - name: traefik
+        image: {{ .Values.core.traefik.image }}
+        args:
+        - --ingressclass=vhp-traefik
+        - --providers.kubernetescrd=true
+        - --providers.kubernetesingress=true
+        - --entrypoints.web.address=:80
+        - --entrypoints.websecure.address=:443
+        - --api.dashboard=false
+        - --ping=true
+        ports:
+        - name: web
+          containerPort: 80
+        - name: websecure
+          containerPort: 443
+        livenessProbe:
+          httpGet:
+            path: /ping
+            port: web
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ping
+            port: web
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: traefik
+  namespace: vhp-core
+  labels:
+    app: traefik
+spec:
+  type: ClusterIP
+  ports:
+  - name: web
+    port: 80
+    targetPort: web
+  - name: websecure
+    port: 443
+    targetPort: websecure
+  selector:
+    app: traefik
+---
+# --- Nginx: sadece dışarıya açık (80/443 LoadBalancer), Traefik'e proxy ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-edge-config
+  namespace: vhp-core
+data:
+  nginx.conf: |
+    events { worker_connections 1024; }
+    stream {
+      server { listen 80;   proxy_pass traefik.vhp-core.svc.cluster.local:80;  }
+      server { listen 443;  proxy_pass traefik.vhp-core.svc.cluster.local:443; }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-edge
+  namespace: vhp-core
+  labels:
+    app: nginx-edge
+spec:
+  replicas: {{ .Values.core.ingress.replicas | default 2 }}
+  selector:
+    matchLabels:
+      app: nginx-edge
+  template:
+    metadata:
+      labels:
+        app: nginx-edge
+    spec:
+      priorityClassName: vhp-system-critical
+      containers:
+      - name: nginx
+        image: {{ .Values.core.ingress.edgeImage | default "nginx:alpine" }}
+        args: ["nginx", "-g", "daemon off;", "-c", "/etc/nginx/nginx.conf"]
+        volumeMounts:
+        - name: config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+          readOnly: true
+        ports:
+        - name: http
+          containerPort: 80
+        - name: https
+          containerPort: 443
+      volumes:
+      - name: config
+        configMap:
+          name: nginx-edge-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-edge
+  namespace: vhp-core
+  labels:
+    app: nginx-edge
+spec:
+  type: LoadBalancer
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP
+  - name: https
+    port: 443
+    targetPort: https
+    protocol: TCP
+  selector:
+    app: nginx-edge
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nginx-edge-pdb
+  namespace: vhp-core
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: nginx-edge
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dns-gateway-config
+  namespace: vhp-core
+data:
+  upstream-namespace: vhp-dns
+  upstream-service: dns-manager
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mail-gateway-config
+  namespace: vhp-core
+  labels:
+    vhp-component: mail-gateway
+data:
+  enabled: "true"
+  smtp-host: {{ .Values.core.mail.smtpHost | default "" | quote }}
+  smtp-port: {{ .Values.core.mail.smtpPort | default "587" | quote }}
+  smtp-from: {{ .Values.core.mail.smtpFrom | default "" | quote }}
+  smtp-tls: {{ .Values.core.mail.smtpTls | default true | quote }}
+  webhook-url: {{ .Values.core.mail.webhookUrl | default "" | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-config
+  namespace: vhp-core
+  labels:
+    vhp-component: platform
+data:
+  ingress-class: "vhp-traefik"
+  panel-host: "{{ .Values.global.panelHost }}"
+  letsencrypt-email: "{{ .Values.global.letsEncryptEmail }}"
+---
+{{- if .Values.core.mail.deploySender }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mail-sender
+  namespace: vhp-core
+  labels:
+    app: mail-sender
+    vhp-component: mail-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mail-sender
+  template:
+    metadata:
+      labels:
+        app: mail-sender
+    spec:
+      containers:
+      - name: sender
+        image: {{ .Values.core.mail.senderImage | default "alpine:latest" }}
+        command: ["/bin/sh", "-c", "while true; do sleep 3600; done"]
+        envFrom:
+        - configMapRef:
+            name: mail-gateway-config
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mail-sender
+  namespace: vhp-core
+  labels:
+    app: mail-sender
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8025
+    targetPort: 8025
+    name: smtp
+  selector:
+    app: mail-sender
+{{- end }}
+{{- end }}
