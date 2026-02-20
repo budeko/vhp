@@ -1,8 +1,0 @@
-# Applied per tenant: namespace cust-{id}
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: cust-PLACEHOLDER_ID
-  labels:
-    app.kubernetes.io/name: tenant
-    tenant-id: PLACEHOLDER_ID
